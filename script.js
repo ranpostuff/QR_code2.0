@@ -15,8 +15,11 @@
   const ROW_GAP = 24 * SCALE;
   const LEFT_MARGIN = 35 * SCALE;
   const TOP_MARGIN = 20 * SCALE;
-  const QR_MODULE_PIXELS = 30; // integer scaling: never blur QR module edges
-  const QR_MODULES_WITH_QUIET_ZONE = 29; // 21 modules + four white modules per side
+  // The active QR pattern now fills the card like the reference image.
+  // Each module remains an exact integer 40 x 40 pixels in the exported PNG.
+  const QR_MODULE_PIXELS = 40;
+  const QR_QUIET_ZONE_MODULES = 1;
+  const QR_MODULES_WITH_QUIET_ZONE = 21 + QR_QUIET_ZONE_MODULES * 2;
   const QR_SIZE = QR_MODULE_PIXELS * QR_MODULES_WITH_QUIET_ZONE;
   let students = [];
   let lastDetection = { students: [], rejected: [] };
@@ -365,7 +368,7 @@
     context.fillStyle = "#ffffff";
     context.fillRect(left, top, QR_SIZE, QR_SIZE);
     context.fillStyle = "#000000";
-    const quiet = 4;
+    const quiet = QR_QUIET_ZONE_MODULES;
     for (let y = 0; y < matrix.length; y += 1) {
       for (let x = 0; x < matrix.length; x += 1) {
         if (matrix[y][x]) {
@@ -413,7 +416,7 @@
       context.strokeRect(x + SCALE / 2, y + SCALE / 2, CARD_WIDTH - SCALE, CARD_HEIGHT - SCALE);
 
       const qrX = x + Math.floor((CARD_WIDTH - QR_SIZE) / 2);
-      const qrY = y + 5 * SCALE;
+      const qrY = y + 4 * SCALE;
       drawQr(context, createQrMatrix(student.lrn), qrX, qrY);
 
       context.fillStyle = "#000000";
