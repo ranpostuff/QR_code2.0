@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Student QR Generator</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; line-height: 1.45; }
+    main { max-width: 1400px; margin: 0 auto; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 420px); gap: 28px; align-items: start; }
+    textarea { display: block; width: 100%; min-height: 260px; resize: vertical; font: inherit; }
+    button { margin: 12px 8px 12px 0; padding: 9px 14px; font: inherit; cursor: pointer; }
+    button:disabled { cursor: wait; }
+    video { display: block; width: 100%; height: auto; background: #000; }
+    .video-panel { position: sticky; top: 20px; }
+    .table-wrap { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #777; padding: 7px 9px; text-align: left; }
+    th { background: #eee; }
+    #studentCount { font-weight: bold; }
+    #status { min-height: 1.5em; }
+    @media (max-width: 760px) {
+      body { padding: 12px; }
+      .layout { grid-template-columns: 1fr; }
+      .video-panel { position: static; }
+      textarea { min-height: 190px; }
+      button { width: 100%; margin-right: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Student QR Generator</h1>
+
+    <div class="layout">
+      <section>
+        <p>
+          Copy any number of columns from your spreadsheet and paste them below.
+          The generator ignores parent details, email addresses, contact numbers,
+          and unrelated columns. It uses only the student name and the exact
+          12-digit LRN from the same spreadsheet row.
+        </p>
+
+        <label for="pasteBox"><strong>Paste spreadsheet data:</strong></label>
+        <textarea id="pasteBox" spellcheck="false" placeholder="Click here and press Ctrl+V. The student table will appear automatically. Include the spreadsheet header row so the student-name column can be identified exactly."></textarea>
+
+        <p id="status" role="status" aria-live="polite"></p>
+
+        <section id="results" hidden>
+          <h2>Detected students</h2>
+          <p id="studentCount"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Student name</th>
+                  <th scope="col">12-digit LRN</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody id="studentRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <p>
+          <button id="exportButton" type="button" disabled>Export high-resolution PNG / ZIP</button>
+        </p>
+
+        <p>
+          Each page is exported at <strong>5656 × 8000 pixels</strong>. Up to 35
+          students fit on one page; additional pages are downloaded together in a ZIP.
+        </p>
+      </section>
+
+      <aside class="video-panel">
+        <h2>How do I do this?</h2>
+        <video id="tutorialVideo" controls autoplay muted playsinline preload="metadata">
+          <source src="tutorial.mp4" type="video/mp4">
+          Your browser cannot play this tutorial video.
+        </video>
+        <p>Upload a file named <strong>tutorial.mp4</strong> beside index.html and script.js.</p>
+      </aside>
+    </div>
+  </main>
+
+  <script src="script.js?v=automatic-paste-4"></script>
+</body>
+</html>
