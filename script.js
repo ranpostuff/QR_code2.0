@@ -16,9 +16,9 @@
   const LEFT_MARGIN = 35 * SCALE;
   const TOP_MARGIN = 20 * SCALE;
   // The active QR pattern now fills the card like the reference image.
-  // Each module remains an exact integer 40 x 40 pixels in the exported PNG.
-  const QR_MODULE_PIXELS = 40;
-  const QR_QUIET_ZONE_MODULES = 1;
+  // Keep four white modules around the QR for reliable scanning.
+  const QR_MODULE_PIXELS = 32;
+  const QR_QUIET_ZONE_MODULES = 4;
   const QR_MODULES_WITH_QUIET_ZONE = 21 + QR_QUIET_ZONE_MODULES * 2;
   const QR_SIZE = QR_MODULE_PIXELS * QR_MODULES_WITH_QUIET_ZONE;
   let students = [];
@@ -137,6 +137,8 @@
       `${students.length} student${students.length === 1 ? "" : "s"} will be created.`;
     results.hidden = students.length === 0;
     exportButton.disabled = students.length === 0;
+    document.getElementById("printButton").disabled = students.length === 0;
+    document.getElementById("svgButton").disabled = students.length === 0;
     status.textContent = `${students.length} valid student${students.length === 1 ? "" : "s"} detected` +
       (result.rejected.length ? `; ${result.rejected.length} unrelated or invalid row${result.rejected.length === 1 ? "" : "s"} ignored.` : ".");
   }
@@ -426,6 +428,66 @@
     return canvas;
   }
 
+  function escapeXml(value) {
+    return String(value).replace(/[&<>"']/g, character => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&apos;'}[character]));
+  }
+
+  // Vector shapes and text are retained through the browser's print/PDF pipeline.
+  function renderSvg(pageStudents) {
+    const measure = document.createElement('canvas').getContext('2d');
+    let content = '<rect width="100%" height="100%" fill="white"/>';
+    pageStudents.forEach((student, index) => {
+      const x = LEFT_MARGIN + (index % COLUMNS) * (CARD_WIDTH + COLUMN_GAP);
+      const y = TOP_MARGIN + Math.floor(index / COLUMNS) * (CARD_HEIGHT + ROW_GAP);
+      const left = x + Math.floor((CARD_WIDTH - QR_SIZE) / 2);
+      const top = y + 4 * SCALE;
+      let path = '';
+      createQrMatrix(student.lrn).forEach((row, yy) => row.forEach((dark, xx) => {
+        if (dark) {
+          const px = left + (xx + QR_QUIET_ZONE_MODULES) * QR_MODULE_PIXELS;
+          const py = top + (yy + QR_QUIET_ZONE_MODULES) * QR_MODULE_PIXELS;
+          path += `M${px} ${py}h${QR_MODULE_PIXELS}v${QR_MODULE_PIXELS}h-${QR_MODULE_PIXELS}z`;
+        }
+      }));
+      fitName(measure, student.name, CARD_WIDTH - 10 * SCALE);
+      const size = parseFloat(measure.font);
+      const fit = measure.measureText(student.name).width > CARD_WIDTH - 10 * SCALE
+        ? ` textLength="${CARD_WIDTH - 10 * SCALE}" lengthAdjust="spacingAndGlyphs"` : '';
+      content += `<rect x="${x + 2}" y="${y + 2}" width="${CARD_WIDTH - 4}" height="${CARD_HEIGHT - 4}" fill="none" stroke="black" stroke-width="4"/>`;
+      content += `<path d="${path}" fill="black"/>`;
+      content += `<text x="${x + CARD_WIDTH / 2}" y="${y + CARD_HEIGHT - 13 * SCALE}" text-anchor="middle" dominant-baseline="central" font-family="Arial, sans-serif" font-size="${size}"${fit}>${escapeXml(student.name)}</text>`;
+    });
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}">${content}</svg>`;
+  }
+
+  function vectorPages() {
+    detectFromPaste();
+    const pages = [];
+    for (let i = 0; i < students.length; i += PER_PAGE) pages.push(renderSvg(students.slice(i, i + PER_PAGE)));
+    return pages;
+  }
+
+  async function exportVectors() {
+    try {
+      const files = vectorPages().map((svg, i) => ({name: `student-qr-vector-${i + 1}.svg`, blob: new Blob([svg], {type: 'image/svg+xml'})}));
+      if (files.length === 1) downloadBlob(files[0].blob, files[0].name);
+      else if (files.length) downloadBlob(await makeZip(files), 'student-qr-vector-pages.zip');
+    } catch (error) { document.getElementById('status').textContent = `Export failed: ${error.message}`; }
+  }
+
+  function printVectors() {
+    const pages = vectorPages();
+    if (!pages.length) return;
+    const preview = window.open('', '_blank');
+    if (!preview) {
+      document.getElementById('status').textContent = 'Allow the print preview window to open, then press Print again.';
+      return;
+    }
+    preview.document.open();
+    preview.document.write(`<!doctype html><html><head><title>Student QR — Vector Print</title><style>@page{size:A4;margin:0}body{margin:0}svg{display:block;width:210mm;height:297mm}section{break-after:page}section:last-child{break-after:auto}nav{padding:16px;font:16px Arial}@media print{nav{display:none}}</style></head><body><nav><button onclick="window.print()">Print / Save as PDF</button> Choose A4, 100% scale, and turn off headers and footers. This document contains vector QR shapes and text.</nav>${pages.map(svg => '<section>' + svg + '</section>').join('')}</body></html>`);
+    preview.document.close();
+  }
+
   function canvasToBlob(canvas) {
     return new Promise((resolve, reject) => {
       canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The browser could not create the PNG.")), "image/png");
@@ -561,6 +623,8 @@
     });
     pasteBox.addEventListener("paste", () => setTimeout(detectFromPaste, 0));
     exportButton.addEventListener("click", exportImages);
+    document.getElementById('printButton').addEventListener('click', printVectors);
+    document.getElementById('svgButton').addEventListener('click', exportVectors);
     status.textContent = "Paste spreadsheet data above. Detection happens automatically.";
 
     const video = document.getElementById("tutorialVideo");
