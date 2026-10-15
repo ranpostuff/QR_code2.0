@@ -46,7 +46,7 @@
         ((/\bstudent\b|\blearner\b|\bpupil\b/).test(value) && /\bname\b/.test(value))
       );
       const lrnColumn = headers.findIndex((value) =>
-        value === "lrn" || /learner reference (number|no)/.test(value)
+        /^lrn(?: 12 digits)?$/.test(value) || /learner reference (number|no)/.test(value)
       );
       if (nameColumn >= 0 || lrnColumn >= 0) {
         return { rowIndex, headers, nameColumn, lrnColumn };
@@ -66,8 +66,20 @@
     return String(text || "")
       .replace(/\r\n?/g, "\n")
       .split("\n")
-      .map((line) => line.split("\t").map(clean))
-      .filter((row) => row.some(Boolean));
+      // Preserve blank lines so sourceRow matches the original pasted text.
+      .map((line) => line.split("\t").map(clean));
+  }
+
+  function invalidLrnReason(value) {
+    const text = clean(value).replace(/^['\u2019]/, "");
+    if (!text) return "LRN is blank. Enter the student's exact 12-digit LRN.";
+    if (/^\d+$/.test(text)) {
+      return `LRN has ${text.length} digits; exactly 12 are required. Check the source record; do not guess or add padding digits.`;
+    }
+    if (/^[\d.]+e[+-]?\d+$/i.test(text)) {
+      return "LRN is in scientific notation. Format the source cell as Text and paste the full original 12 digits.";
+    }
+    return "LRN contains spaces, punctuation, or non-digit characters. It must contain exactly 12 digits.";
   }
 
   function detectStudents(rows) {
@@ -83,35 +95,95 @@
     const rejected = [];
     for (let rowIndex = start; rowIndex < rows.length; rowIndex += 1) {
       const row = rows[rowIndex];
+      if (!row.some((cell) => clean(cell))) continue;
+      const reasons = [];
       const exactValues = row.map((cell, column) => ({ value: exactLrn(cell), column })).filter((item) => item.value);
       let selectedLrn = null;
-      if (header.lrnColumn >= 0 && exactLrn(row[header.lrnColumn])) {
-        selectedLrn = { value: exactLrn(row[header.lrnColumn]), column: header.lrnColumn };
+      if (header.lrnColumn >= 0) {
+        const value = exactLrn(row[header.lrnColumn]);
+        if (value) selectedLrn = { value, column: header.lrnColumn };
+        else reasons.push(invalidLrnReason(row[header.lrnColumn]));
       } else if (exactValues.length === 1) {
         selectedLrn = exactValues[0];
       }
       if (!selectedLrn) {
-        rejected.push({
-          row: rowIndex + 1,
-          reason: exactValues.length > 1 ? "multiple 12-digit values and no clear LRN column" : "no exact 12-digit LRN"
-        });
-        continue;
+        if (!reasons.length) reasons.push(exactValues.length > 1
+          ? `Ambiguous LRN: ${exactValues.length} different columns contain 12-digit values. Add an LRN column heading to identify the correct column.`
+          : "No exact 12-digit LRN found. Add an LRN heading and check that student's original number.");
       }
 
-      const lrn = selectedLrn.value;
       let name = header.nameColumn >= 0 ? clean(row[header.nameColumn]) : "";
-      if (!plausibleName(name)) {
+      if (header.nameColumn < 0) {
         name = row.find((cell, index) =>
-          index !== selectedLrn.column && !ignoredNameColumns.has(index) && plausibleName(cell)
+          index !== (selectedLrn ? selectedLrn.column : header.lrnColumn) && !ignoredNameColumns.has(index) && plausibleName(cell)
         ) || "";
       }
-      if (!name) {
-        rejected.push({ row: rowIndex + 1, reason: "student name not found" });
+      if (!plausibleName(name)) reasons.push(name
+        ? "The student-name cell does not look like a name (it may contain an email, number, or heading)."
+        : "Student name is missing. Fill the student-name cell or add a Name of Student heading.");
+      if (reasons.length) {
+        rejected.push({ row: rowIndex + 1, reason: reasons.join(" "), reasons, cells: row.slice() });
         continue;
       }
+      const lrn = selectedLrn.value;
       found.push({ name, lrn, sourceRow: rowIndex + 1, cells: row.slice() });
     }
     return { students: found, rejected };
+  }
+
+  function renderRejectedRows(rejected) {
+    let panel = document.getElementById("rejectedResults");
+    if (!panel) {
+      // Build this panel here so the existing index.html does not need replacing.
+      panel = document.createElement("section");
+      panel.id = "rejectedResults";
+      panel.setAttribute("aria-labelledby", "rejectedHeading");
+      panel.style.cssText = "margin:20px 0;padding:16px;border:1px solid #b45309;background:#fff7ed;color:#431407;";
+      const heading = document.createElement("h2");
+      heading.id = "rejectedHeading";
+      heading.textContent = "Rows needing attention";
+      panel.appendChild(heading);
+      const description = document.createElement("p");
+      description.textContent = "These rows will NOT be exported. Row numbers count from the first line pasted above, including blank lines (not necessarily the original Excel row numbers). Fix the pasted data to update this list automatically. Headings and blank lines are not student records.";
+      panel.appendChild(description);
+      const count = document.createElement("p");
+      count.id = "rejectedCount";
+      panel.appendChild(count);
+      const wrapper = document.createElement("div");
+      wrapper.className = "table-wrap";
+      const table = document.createElement("table");
+      const head = document.createElement("thead");
+      const headerRow = document.createElement("tr");
+      ["Pasted row", "Row contents", "Why it was rejected"].forEach((label) => {
+        const th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = label;
+        headerRow.appendChild(th);
+      });
+      head.appendChild(headerRow);
+      table.appendChild(head);
+      const body = document.createElement("tbody");
+      body.id = "rejectedRows";
+      table.appendChild(body);
+      wrapper.appendChild(table);
+      panel.appendChild(wrapper);
+      document.getElementById("status").insertAdjacentElement("afterend", panel);
+    }
+    const body = document.getElementById("rejectedRows");
+    body.textContent = "";
+    panel.hidden = rejected.length === 0;
+    document.getElementById("rejectedCount").textContent = `${rejected.length} rejected row${rejected.length === 1 ? "" : "s"}.`;
+    rejected.forEach((item) => {
+      const tr = document.createElement("tr");
+      const contents = (item.cells || []).map((cell, index) => `Column ${index + 1}: ${clean(cell) || "(blank)"}`).join("\n");
+      [String(item.row), contents, item.reason].forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        td.style.cssText = "vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere;";
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
   }
 
   function renderPreview(result) {
@@ -122,6 +194,7 @@
     const body = document.getElementById("studentRows");
     const exportButton = document.getElementById("exportButton");
     body.textContent = "";
+    renderRejectedRows(result.rejected);
 
     students.forEach((student) => {
       const tr = document.createElement("tr");
@@ -140,7 +213,7 @@
     document.getElementById("printButton").disabled = students.length === 0;
     document.getElementById("svgButton").disabled = students.length === 0;
     status.textContent = `${students.length} valid student${students.length === 1 ? "" : "s"} detected` +
-      (result.rejected.length ? `; ${result.rejected.length} unrelated or invalid row${result.rejected.length === 1 ? "" : "s"} ignored.` : ".");
+      (result.rejected.length ? `; ${result.rejected.length} row${result.rejected.length === 1 ? "" : "s"} rejected. See Rows needing attention below for the contents and reasons.` : ".");
   }
 
   function detectFromPaste() {
