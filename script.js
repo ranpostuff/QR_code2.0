@@ -72,23 +72,18 @@
 
   function invalidLrnReason(value) {
     const text = clean(value).replace(/^['\u2019]/, "");
-    if (!text) return "LRN is blank. Enter the student's exact 12-digit LRN.";
     if (!text) return "Missing LRN";
     if (/^\d+$/.test(text)) {
-      return `LRN has ${text.length} digits; exactly 12 are required. Check the source record; do not guess or add padding digits.`;
       const difference = Math.abs(12 - text.length);
       return `${text.length < 12 ? "Missing" : "Extra"} ${difference} digit${difference === 1 ? "" : "s"}`;
     }
     if (/^[\d.]+e[+-]?\d+$/i.test(text)) {
-      return "LRN is in scientific notation. Format the source cell as Text and paste the full original 12 digits.";
       return "Scientific notation — paste the full 12-digit LRN";
     }
-    return "LRN contains spaces, punctuation, or non-digit characters. It must contain exactly 12 digits.";
     return "Contains spaces or non-digit characters";
   }
 
   function detectStudents(rows) {
-    if (!rows.length) return { students: [], rejected: [] };
     if (!rows.length) return { students: [], rejected: [], ignored: [] };
     const header = findHeaderInformation(rows);
     const start = header.rowIndex >= 0 ? header.rowIndex + 1 : 0;
@@ -100,7 +95,6 @@
     const found = [];
     const rejected = [];
     const ignored = [];
-    for (let rowIndex = start; rowIndex < rows.length; rowIndex += 1) {
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
       const row = rows[rowIndex];
       if (!row.some((cell) => clean(cell))) continue;
@@ -142,12 +136,9 @@
         ) || "";
       }
       if (!plausibleName(name)) reasons.push(name
-        ? "The student-name cell does not look like a name (it may contain an email, number, or heading)."
-        : "Student name is missing. Fill the student-name cell or add a Name of Student heading.");
         ? "Invalid student name"
         : "Missing student name");
       if (reasons.length) {
-        rejected.push({ row: rowIndex + 1, reason: reasons.join(" "), reasons, cells: row.slice() });
         const enteredLrn = header.lrnColumn >= 0
           ? clean(row[header.lrnColumn])
           : selectedLrn ? selectedLrn.value : exactValues.length ? exactValues.map((item) => item.value).join(" / ")
@@ -162,11 +153,9 @@
       const lrn = selectedLrn.value;
       found.push({ name, lrn, sourceRow: rowIndex + 1, cells: row.slice() });
     }
-    return { students: found, rejected };
     return { students: found, rejected, ignored };
   }
 
-  function renderRejectedRows(rejected) {
   function renderRejectedRows(rejected, ignored = []) {
     let panel = document.getElementById("rejectedResults");
     if (!panel) {
@@ -177,11 +166,9 @@
       panel.style.cssText = "margin:20px 0;padding:16px;border:1px solid #b45309;background:#fff7ed;color:#431407;";
       const heading = document.createElement("h2");
       heading.id = "rejectedHeading";
-      heading.textContent = "Rows needing attention";
       heading.textContent = "Students needing attention";
       panel.appendChild(heading);
       const description = document.createElement("p");
-      description.textContent = "These rows will NOT be exported. Row numbers count from the first line pasted above, including blank lines (not necessarily the original Excel row numbers). Fix the pasted data to update this list automatically. Headings and blank lines are not student records.";
       description.textContent = "Correct these students in the pasted data. Do not guess missing digits. Separators and other non-student rows are listed separately below.";
       panel.appendChild(description);
       const count = document.createElement("p");
@@ -192,7 +179,6 @@
       const table = document.createElement("table");
       const head = document.createElement("thead");
       const headerRow = document.createElement("tr");
-      ["Pasted row", "Row contents", "Why it was rejected"].forEach((label) => {
       ["Student", "LRN Provided", "Digit Count", "Issue"].forEach((label) => {
         const th = document.createElement("th");
         th.scope = "col";
@@ -222,9 +208,6 @@
     }
     const body = document.getElementById("rejectedRows");
     body.textContent = "";
-    panel.hidden = rejected.length === 0;
-    document.getElementById("rejectedCount").textContent = `${rejected.length} rejected row${rejected.length === 1 ? "" : "s"}.`;
-    rejected.forEach((item) => {
     panel.hidden = rejected.length === 0 && ignored.length === 0;
     const lrnProblems = rejected.filter((item) => item.lrnInvalid).length;
     document.getElementById("rejectedCount").textContent = lrnProblems === 1
@@ -234,8 +217,6 @@
     body.parentElement && (body.parentElement.hidden = rejected.length === 0);
     rejected.slice().sort((a,b) => Number(Boolean(b.name)) - Number(Boolean(a.name))).forEach((item) => {
       const tr = document.createElement("tr");
-      const contents = (item.cells || []).map((cell, index) => `Column ${index + 1}: ${clean(cell) || "(blank)"}`).join("\n");
-      [String(item.row), contents, item.reason].forEach((value) => {
       [item.name || `(Missing student name — row ${item.row})`, item.lrn || "(blank)", String(item.digitCount), item.reason].forEach((value, index) => {
         const td = document.createElement("td");
         td.textContent = value;
@@ -264,12 +245,10 @@
     const body = document.getElementById("studentRows");
     const exportButton = document.getElementById("exportButton");
     body.textContent = "";
-    renderRejectedRows(result.rejected);
     renderRejectedRows(result.rejected, result.ignored);
 
     students.forEach((student) => {
       const tr = document.createElement("tr");
-      [student.name, student.lrn, "Ready to export"].forEach((value) => {
       [student.name, student.lrn, "Ready to export"].forEach((value, index) => {
         const td = document.createElement("td");
         td.textContent = value;
@@ -286,7 +265,6 @@
     document.getElementById("printButton").disabled = students.length === 0;
     document.getElementById("svgButton").disabled = students.length === 0;
     status.textContent = `${students.length} valid student${students.length === 1 ? "" : "s"} detected` +
-      (result.rejected.length ? `; ${result.rejected.length} row${result.rejected.length === 1 ? "" : "s"} rejected. See Rows needing attention below for the contents and reasons.` : ".");
       (result.rejected.length ? `; ${result.rejected.length} row${result.rejected.length === 1 ? "" : "s"} needs a name or LRN correction. See Students needing attention below.` : ".");
   }
 
