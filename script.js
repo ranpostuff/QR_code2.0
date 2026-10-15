@@ -1,6 +1,5 @@
 (function () {
   "use strict";
-
   // The old page was 1414 x 2000. Every measurement below is exactly 4x,
   // so Canva receives a much larger image without changing the layout.
   const SCALE = 4;
@@ -23,20 +22,16 @@
   const QR_SIZE = QR_MODULE_PIXELS * QR_MODULES_WITH_QUIET_ZONE;
   let students = [];
   let lastDetection = { students: [], rejected: [] };
-
   function clean(value) {
     return String(value == null ? "" : value).replace(/\u00a0/g, " ").trim();
   }
-
   function exactLrn(value) {
     const text = clean(value).replace(/^['\u2019]/, "");
     return /^\d{12}$/.test(text) ? text : null;
   }
-
   function normalizedHeader(value) {
     return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   }
-
   function findHeaderInformation(rows) {
     const maximum = Math.min(rows.length, 10);
     for (let rowIndex = 0; rowIndex < maximum; rowIndex += 1) {
@@ -54,14 +49,12 @@
     }
     return { rowIndex: -1, headers: [], nameColumn: -1, lrnColumn: -1 };
   }
-
   function plausibleName(value) {
     const text = clean(value);
     if (!text || exactLrn(text) || /@/.test(text) || /^\+?[\d\s().-]{7,}$/.test(text)) return false;
     if (/^(lrn|email|phone|contact|parent|name|student|no\.?|number)$/i.test(text)) return false;
     return /[a-zA-ZÀ-ÿ]/.test(text);
   }
-
   function parseRows(text) {
     return String(text || "")
       .replace(/\r\n?/g, "\n")
@@ -69,7 +62,6 @@
       // Preserve blank lines so sourceRow matches the original pasted text.
       .map((line) => line.split("\t").map(clean));
   }
-
   function invalidLrnReason(value) {
     const text = clean(value).replace(/^['\u2019]/, "");
     if (!text) return "LRN is blank. Enter the student's exact 12-digit LRN.";
@@ -81,7 +73,6 @@
     }
     return "LRN contains spaces, punctuation, or non-digit characters. It must contain exactly 12 digits.";
   }
-
   function detectStudents(rows) {
     if (!rows.length) return { students: [], rejected: [] };
     const header = findHeaderInformation(rows);
@@ -90,12 +81,14 @@
     header.headers.forEach((value, index) => {
       if (/parent|guardian|mother|father|email|phone|contact|address|number/.test(value)) ignoredNameColumns.add(index);
     });
-
     const found = [];
     const rejected = [];
     for (let rowIndex = start; rowIndex < rows.length; rowIndex += 1) {
       const row = rows[rowIndex];
       if (!row.some((cell) => clean(cell))) continue;
+      // When headings identify both fields, ignore rows containing only other data.
+      if (header.nameColumn >= 0 && header.lrnColumn >= 0 &&
+          !clean(row[header.nameColumn]) && !clean(row[header.lrnColumn])) continue;
       const reasons = [];
       const exactValues = row.map((cell, column) => ({ value: exactLrn(cell), column })).filter((item) => item.value);
       let selectedLrn = null;
@@ -111,7 +104,6 @@
           ? `Ambiguous LRN: ${exactValues.length} different columns contain 12-digit values. Add an LRN column heading to identify the correct column.`
           : "No exact 12-digit LRN found. Add an LRN heading and check that student's original number.");
       }
-
       let name = header.nameColumn >= 0 ? clean(row[header.nameColumn]) : "";
       if (header.nameColumn < 0) {
         name = row.find((cell, index) =>
@@ -123,6 +115,11 @@
         : "Student name is missing. Fill the student-name cell or add a Name of Student heading.");
       if (reasons.length) {
         rejected.push({ row: rowIndex + 1, reason: reasons.join(" "), reasons, cells: row.slice() });
+        const enteredLrn = header.lrnColumn >= 0
+          ? clean(row[header.lrnColumn])
+          : selectedLrn ? selectedLrn.value : exactValues.map((item) => item.value).join(" / ");
+        rejected.push({ row: rowIndex + 1, name, lrn: enteredLrn,
+          reason: reasons.join(" "), reasons });
         continue;
       }
       const lrn = selectedLrn.value;
@@ -130,7 +127,6 @@
     }
     return { students: found, rejected };
   }
-
   function renderRejectedRows(rejected) {
     let panel = document.getElementById("rejectedResults");
     if (!panel) {
@@ -142,9 +138,11 @@
       const heading = document.createElement("h2");
       heading.id = "rejectedHeading";
       heading.textContent = "Rows needing attention";
+      heading.textContent = "Students needing attention";
       panel.appendChild(heading);
       const description = document.createElement("p");
       description.textContent = "These rows will NOT be exported. Row numbers count from the first line pasted above, including blank lines (not necessarily the original Excel row numbers). Fix the pasted data to update this list automatically. Headings and blank lines are not student records.";
+      description.textContent = "Only student names and LRNs are checked. Other columns are ignored. Fix the name or LRN below in the pasted data; this list updates automatically. Pasted row numbers count from the first pasted line, including blank lines.";
       panel.appendChild(description);
       const count = document.createElement("p");
       count.id = "rejectedCount";
@@ -155,6 +153,7 @@
       const head = document.createElement("thead");
       const headerRow = document.createElement("tr");
       ["Pasted row", "Row contents", "Why it was rejected"].forEach((label) => {
+      ["Student name", "LRN", "What to fix", "Pasted row"].forEach((label) => {
         const th = document.createElement("th");
         th.scope = "col";
         th.textContent = label;
@@ -177,15 +176,17 @@
       const tr = document.createElement("tr");
       const contents = (item.cells || []).map((cell, index) => `Column ${index + 1}: ${clean(cell) || "(blank)"}`).join("\n");
       [String(item.row), contents, item.reason].forEach((value) => {
+      [item.name || "(Missing student name)", item.lrn || "(Missing / not identified)", item.reason, String(item.row)].forEach((value, index) => {
         const td = document.createElement("td");
         td.textContent = value;
         td.style.cssText = "vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere;";
+        if (index === 0) td.style.cssText += "font-weight:700;font-size:1.1em;min-width:180px;";
+        if (index === 1) td.style.cssText += "font-family:monospace;min-width:140px;";
         tr.appendChild(td);
       });
       body.appendChild(tr);
     });
   }
-
   function renderPreview(result) {
     lastDetection = result;
     students = result.students;
@@ -195,17 +196,17 @@
     const exportButton = document.getElementById("exportButton");
     body.textContent = "";
     renderRejectedRows(result.rejected);
-
     students.forEach((student) => {
       const tr = document.createElement("tr");
       [student.name, student.lrn, "Ready to export"].forEach((value) => {
+      [student.name, student.lrn, "Ready to export"].forEach((value, index) => {
         const td = document.createElement("td");
         td.textContent = value;
+        if (index === 0) td.style.fontWeight = "700";
         tr.appendChild(td);
       });
       body.appendChild(tr);
     });
-
     document.getElementById("studentCount").textContent =
       `${students.length} student${students.length === 1 ? "" : "s"} will be created.`;
     results.hidden = students.length === 0;
@@ -214,13 +215,12 @@
     document.getElementById("svgButton").disabled = students.length === 0;
     status.textContent = `${students.length} valid student${students.length === 1 ? "" : "s"} detected` +
       (result.rejected.length ? `; ${result.rejected.length} row${result.rejected.length === 1 ? "" : "s"} rejected. See Rows needing attention below for the contents and reasons.` : ".");
+      (result.rejected.length ? `; ${result.rejected.length} row${result.rejected.length === 1 ? "" : "s"} needs a name or LRN correction. See Students needing attention below.` : ".");
   }
-
   function detectFromPaste() {
     const rows = parseRows(document.getElementById("pasteBox").value);
     renderPreview(detectStudents(rows));
   }
-
   // Minimal standards-compliant QR encoder for an exact 12-digit numeric LRN.
   // It creates a Version 1-M QR (21 x 21 modules) with Reed-Solomon correction.
   const GF_EXP = new Uint8Array(512);
@@ -235,11 +235,9 @@
     }
     for (let i = 255; i < 512; i += 1) GF_EXP[i] = GF_EXP[i - 255];
   }());
-
   function gfMultiply(a, b) {
     return a && b ? GF_EXP[GF_LOG[a] + GF_LOG[b]] : 0;
   }
-
   function generatorPolynomial(degree) {
     let result = [1];
     for (let i = 0; i < degree; i += 1) {
@@ -252,7 +250,6 @@
     }
     return result;
   }
-
   function reedSolomon(data, degree) {
     const generator = generatorPolynomial(degree);
     const message = data.concat(new Array(degree).fill(0));
@@ -265,11 +262,9 @@
     }
     return message.slice(data.length);
   }
-
   function appendBits(target, value, length) {
     for (let bit = length - 1; bit >= 0; bit -= 1) target.push((value >>> bit) & 1);
   }
-
   function makeCodewords(lrn) {
     if (!/^\d{12}$/.test(lrn)) throw new Error("Every LRN must contain exactly 12 digits.");
     const bits = [];
@@ -291,7 +286,6 @@
     for (let pad = 0; data.length < 16; pad += 1) data.push(pad % 2 ? 0x11 : 0xec);
     return data.concat(reedSolomon(data, 10));
   }
-
   function markFinder(matrix, functional, left, top) {
     const size = matrix.length;
     for (let y = -1; y <= 7; y += 1) {
@@ -306,7 +300,6 @@
       }
     }
   }
-
   function formatBits(mask) {
     const data = mask; // Error correction M = binary 00
     let remainder = data << 10;
@@ -315,7 +308,6 @@
     }
     return ((data << 10) | remainder) ^ 0x5412;
   }
-
   function setFormat(matrix, functional, mask) {
     const size = matrix.length;
     const value = formatBits(mask);
@@ -333,7 +325,6 @@
     matrix[size - 8][8] = true;
     functional[size - 8][8] = true;
   }
-
   function maskCondition(mask, x, y) {
     switch (mask) {
       case 0: return (x + y) % 2 === 0;
@@ -346,7 +337,6 @@
       default: return ((x + y) % 2 + (x * y) % 3) % 2 === 0;
     }
   }
-
   function penalty(matrix) {
     const size = matrix.length;
     let score = 0;
@@ -391,7 +381,6 @@
     score += Math.floor(Math.abs(dark * 20 - size * size * 10) / (size * size)) * 10;
     return score;
   }
-
   function createQrMatrix(lrn) {
     const size = 21;
     const base = Array.from({ length: size }, () => new Array(size).fill(false));
@@ -406,7 +395,6 @@
       functional[i][6] = true;
     }
     setFormat(base, functional, 0); // also reserves every format module
-
     const dataBits = [];
     makeCodewords(lrn).forEach((byte) => appendBits(dataBits, byte, 8));
     let best = null;
@@ -438,7 +426,6 @@
     }
     return best;
   }
-
   function drawQr(context, matrix, left, top) {
     context.fillStyle = "#ffffff";
     context.fillRect(left, top, QR_SIZE, QR_SIZE);
@@ -457,7 +444,6 @@
       }
     }
   }
-
   function fitName(context, name, maxWidth) {
     let size = 14 * SCALE;
     const minimum = 9 * SCALE;
@@ -469,7 +455,6 @@
     context.font = `${size}px Arial, sans-serif`;
     return name;
   }
-
   function renderPage(pageStudents) {
     const canvas = document.createElement("canvas");
     canvas.width = PAGE_WIDTH;
@@ -480,7 +465,6 @@
     context.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
     context.textAlign = "center";
     context.textBaseline = "middle";
-
     pageStudents.forEach((student, index) => {
       const column = index % COLUMNS;
       const row = Math.floor(index / COLUMNS);
@@ -489,22 +473,18 @@
       context.strokeStyle = "#000000";
       context.lineWidth = SCALE;
       context.strokeRect(x + SCALE / 2, y + SCALE / 2, CARD_WIDTH - SCALE, CARD_HEIGHT - SCALE);
-
       const qrX = x + Math.floor((CARD_WIDTH - QR_SIZE) / 2);
       const qrY = y + 4 * SCALE;
       drawQr(context, createQrMatrix(student.lrn), qrX, qrY);
-
       context.fillStyle = "#000000";
       fitName(context, student.name, CARD_WIDTH - 10 * SCALE);
       context.fillText(student.name, x + CARD_WIDTH / 2, y + CARD_HEIGHT - 13 * SCALE);
     });
     return canvas;
   }
-
   function escapeXml(value) {
     return String(value).replace(/[&<>"']/g, character => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&apos;'}[character]));
   }
-
   // Vector shapes and text are retained through the browser's print/PDF pipeline.
   function renderSvg(pageStudents) {
     const measure = document.createElement('canvas').getContext('2d');
@@ -532,14 +512,12 @@
     });
     return `<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}">${content}</svg>`;
   }
-
   function vectorPages() {
     detectFromPaste();
     const pages = [];
     for (let i = 0; i < students.length; i += PER_PAGE) pages.push(renderSvg(students.slice(i, i + PER_PAGE)));
     return pages;
   }
-
   async function exportVectors() {
     try {
       const files = vectorPages().map((svg, i) => ({name: `student-qr-vector-${i + 1}.svg`, blob: new Blob([svg], {type: 'image/svg+xml'})}));
@@ -547,7 +525,6 @@
       else if (files.length) downloadBlob(await makeZip(files), 'student-qr-vector-pages.zip');
     } catch (error) { document.getElementById('status').textContent = `Export failed: ${error.message}`; }
   }
-
   function printVectors() {
     const pages = vectorPages();
     if (!pages.length) return;
@@ -560,13 +537,11 @@
     preview.document.write(`<!doctype html><html><head><title>Student QR — Vector Print</title><style>@page{size:A4;margin:0}body{margin:0}svg{display:block;width:210mm;height:297mm}section{break-after:page}section:last-child{break-after:auto}nav{padding:16px;font:16px Arial}@media print{nav{display:none}}</style></head><body><nav><button onclick="window.print()">Print / Save as PDF</button> Choose A4, 100% scale, and turn off headers and footers. This document contains vector QR shapes and text.</nav>${pages.map(svg => '<section>' + svg + '</section>').join('')}</body></html>`);
     preview.document.close();
   }
-
   function canvasToBlob(canvas) {
     return new Promise((resolve, reject) => {
       canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The browser could not create the PNG.")), "image/png");
     });
   }
-
   function downloadBlob(blob, filename) {
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -576,7 +551,6 @@
     link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 2000);
   }
-
   const CRC_TABLE = (function () {
     const table = new Uint32Array(256);
     for (let n = 0; n < 256; n += 1) {
@@ -586,25 +560,21 @@
     }
     return table;
   }());
-
   function crc32(bytes) {
     let crc = 0xffffffff;
     for (let i = 0; i < bytes.length; i += 1) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
     return (crc ^ 0xffffffff) >>> 0;
   }
-
   function write16(array, offset, value) {
     array[offset] = value & 0xff;
     array[offset + 1] = (value >>> 8) & 0xff;
   }
-
   function write32(array, offset, value) {
     array[offset] = value & 0xff;
     array[offset + 1] = (value >>> 8) & 0xff;
     array[offset + 2] = (value >>> 16) & 0xff;
     array[offset + 3] = (value >>> 24) & 0xff;
   }
-
   async function makeZip(files) {
     const encoder = new TextEncoder();
     const chunks = [];
@@ -625,7 +595,6 @@
       write16(local, 26, name.length);
       local.set(name, 30);
       chunks.push(local, data);
-
       const entry = new Uint8Array(46 + name.length);
       write32(entry, 0, 0x02014b50);
       write16(entry, 4, 20);
@@ -650,7 +619,6 @@
     write32(end, 16, offset);
     return new Blob(chunks.concat(central, [end]), { type: "application/zip" });
   }
-
   async function exportImages() {
     detectFromPaste();
     if (!students.length) {
@@ -681,7 +649,6 @@
       button.disabled = students.length === 0;
     }
   }
-
   function initialize() {
     const pasteBox = document.getElementById("pasteBox");
     const exportButton = document.getElementById("exportButton");
@@ -699,7 +666,6 @@
     document.getElementById('printButton').addEventListener('click', printVectors);
     document.getElementById('svgButton').addEventListener('click', exportVectors);
     status.textContent = "Paste spreadsheet data above. Detection happens automatically.";
-
     const video = document.getElementById("tutorialVideo");
     let pausedAtOneMinute = false;
     video.addEventListener("timeupdate", () => {
@@ -709,7 +675,6 @@
       }
     });
   }
-
   if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded", initialize);
   if (typeof module !== "undefined" && module.exports) {
     module.exports = { createQrMatrix, makeCodewords, detectStudents, parseRows, formatBits };
