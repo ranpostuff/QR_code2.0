@@ -28,6 +28,13 @@
     return String(value == null ? "" : value).replace(/\u00a0/g, " ").trim();
   }
 
+  // Adds the section (e.g. "10-A") to the end of a student's name.
+  function makeLabel(name) {
+    const box = document.getElementById("sectionBox");
+    const section = box ? clean(box.value) : "";
+    return section ? `${name} ${section}` : name;
+  }
+
   function exactLrn(value) {
     const text = clean(value).replace(/^['\u2019]/, "");
     return /^\d{12}$/.test(text) ? text : null;
@@ -239,7 +246,8 @@
 
   function renderPreview(result) {
     lastDetection = result;
-    students = result.students;
+    // Each student gets a label = name + section (if a section was typed).
+    students = result.students.map((student) => ({ ...student, label: makeLabel(student.name) }));
     const status = document.getElementById("status");
     const results = document.getElementById("results");
     const body = document.getElementById("studentRows");
@@ -249,7 +257,7 @@
 
     students.forEach((student) => {
       const tr = document.createElement("tr");
-      [student.name, student.lrn, "Ready to export"].forEach((value, index) => {
+      [student.label, student.lrn, "Ready to export"].forEach((value, index) => {
         const td = document.createElement("td");
         td.textContent = value;
         if (index === 0) td.style.fontWeight = "700";
@@ -547,8 +555,8 @@
       drawQr(context, createQrMatrix(student.lrn), qrX, qrY);
 
       context.fillStyle = "#000000";
-      fitName(context, student.name, CARD_WIDTH - 10 * SCALE);
-      context.fillText(student.name, x + CARD_WIDTH / 2, y + CARD_HEIGHT - 13 * SCALE);
+      fitName(context, student.label, CARD_WIDTH - 10 * SCALE);
+      context.fillText(student.label, x + CARD_WIDTH / 2, y + CARD_HEIGHT - 13 * SCALE);
     });
     return canvas;
   }
@@ -574,13 +582,13 @@
           path += `M${px} ${py}h${QR_MODULE_PIXELS}v${QR_MODULE_PIXELS}h-${QR_MODULE_PIXELS}z`;
         }
       }));
-      fitName(measure, student.name, CARD_WIDTH - 10 * SCALE);
+      fitName(measure, student.label, CARD_WIDTH - 10 * SCALE);
       const size = parseFloat(measure.font);
-      const fit = measure.measureText(student.name).width > CARD_WIDTH - 10 * SCALE
+      const fit = measure.measureText(student.label).width > CARD_WIDTH - 10 * SCALE
         ? ` textLength="${CARD_WIDTH - 10 * SCALE}" lengthAdjust="spacingAndGlyphs"` : '';
       content += `<rect x="${x + 2}" y="${y + 2}" width="${CARD_WIDTH - 4}" height="${CARD_HEIGHT - 4}" fill="none" stroke="black" stroke-width="4"/>`;
       content += `<path d="${path}" fill="black"/>`;
-      content += `<text x="${x + CARD_WIDTH / 2}" y="${y + CARD_HEIGHT - 13 * SCALE}" text-anchor="middle" dominant-baseline="central" font-family="Arial, sans-serif" font-size="${size}"${fit}>${escapeXml(student.name)}</text>`;
+      content += `<text x="${x + CARD_WIDTH / 2}" y="${y + CARD_HEIGHT - 13 * SCALE}" text-anchor="middle" dominant-baseline="central" font-family="Arial, sans-serif" font-size="${size}"${fit}>${escapeXml(student.label)}</text>`;
     });
     return `<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}">${content}</svg>`;
   }
@@ -747,6 +755,9 @@
       detectionTimer = setTimeout(detectFromPaste, 100);
     });
     pasteBox.addEventListener("paste", () => setTimeout(detectFromPaste, 0));
+    // Refresh the preview whenever the section changes.
+    const sectionBox = document.getElementById("sectionBox");
+    if (sectionBox) sectionBox.addEventListener("input", detectFromPaste);
     exportButton.addEventListener("click", exportImages);
     document.getElementById('printButton').addEventListener('click', printVectors);
     document.getElementById('svgButton').addEventListener('click', exportVectors);
